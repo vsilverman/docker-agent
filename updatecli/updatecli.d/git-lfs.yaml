@@ -1,0 +1,73 @@
+name: Bump `git-lfs` version
+
+scms:
+  default:
+    kind: github
+    spec:
+      user: "{{ .github.user }}"
+      email: "{{ .github.email }}"
+      owner: "{{ .github.owner }}"
+      repository: "{{ .github.repository }}"
+      token: "{{ requiredEnv .github.token }}"
+      username: "{{ .github.username }}"
+      branch: "{{ .github.branch }}"
+
+sources:
+  lastVersion:
+    kind: githubrelease
+    name: Get latest `git-lfs` version
+    spec:
+      owner: git-lfs
+      repository: git-lfs
+      token: "{{ requiredEnv .github.token }}"
+      username: "{{ .github.username }}"
+      versionfilter:
+        kind: semver
+    transformers:
+      - trimprefix: "v"
+
+targets:
+  setGitLfsVersion:
+    name: Update `git-lfs` version in Dockerfiles
+    kind: dockerfile
+    spec:
+      files:
+        - alpine/Dockerfile
+        - debian/Dockerfile
+        - rhel/ubi9/Dockerfile
+        - windows/nanoserver/Dockerfile
+        - windows/windowsservercore/Dockerfile
+      instruction:
+        keyword: ARG
+        matcher: GIT_LFS_VERSION
+    scmid: default
+  setGitLfsVersionLinuxTests:
+    name: Update `git-lfs` version in Linux tests
+    kind: file
+    spec:
+      file: tests/tests_agent.bats
+      matchpattern: >
+        GIT_LFS_VERSION=(.*)
+      replacepattern: >
+        GIT_LFS_VERSION='{{ source "lastVersion" }}'
+    scmid: default
+  setGitLfsVersionWindowsTests:
+    name: Update `git-lfs` version in Windows tests
+    kind: file
+    spec:
+      file: tests/agent.Tests.ps1
+      matchpattern: >
+        global:GITLFSVERSION =(.*)
+      replacepattern: >
+        global:GITLFSVERSION = '{{ source "lastVersion" }}'
+    scmid: default
+
+actions:
+  default:
+    kind: github/pullrequest
+    title: Bump `git-lfs` version to {{ source "lastVersion" }}
+    scmid: default
+    spec:
+      labels:
+        - enhancement
+        - git-lfs

@@ -1,0 +1,71 @@
+---
+name: Bump Debian Trixie version
+
+scms:
+  default:
+    kind: github
+    spec:
+      user: "{{ .github.user }}"
+      email: "{{ .github.email }}"
+      owner: "{{ .github.owner }}"
+      repository: "{{ .github.repository }}"
+      token: "{{ requiredEnv .github.token }}"
+      username: "{{ .github.username }}"
+      branch: "{{ .github.branch }}"
+
+sources:
+  trixieLatestVersion:
+    kind: dockerimage
+    name: "Get latest Debian trixie Linux version"
+    spec:
+      image: "debian"
+      tagfilter: "trixie-*"
+      versionfilter:
+        kind: regex
+        pattern: >-
+          trixie-\d+$
+
+conditions:
+  checkArchitecturesAvailability:
+    kind: dockerimage
+    name: Check if container image is available for all architectures
+    sourceid: trixieLatestVersion
+    spec:
+      image: "debian"
+      architectures:
+        - linux/amd64
+        - linux/arm64
+        - linux/arm/v7
+        - linux/s390x
+        - linux/ppc64le
+        - linux/riscv64
+
+targets:
+  updateDockerfile:
+    name: "Update value of base image (ARG DEBIAN_RELEASE) in Dockerfile"
+    kind: dockerfile
+    sourceid: trixieLatestVersion
+    spec:
+      file: debian/Dockerfile
+      instruction:
+        keyword: "ARG"
+        matcher: "DEBIAN_RELEASE"
+    scmid: default
+  updateDockerBake:
+    name: "Update default value of variable DEBIAN_RELEASE in docker-bake.hcl"
+    kind: hcl
+    sourceid: trixieLatestVersion
+    spec:
+      file: docker-bake.hcl
+      path: variable.DEBIAN_RELEASE.default
+    scmid: default
+
+actions:
+  default:
+    kind: github/pullrequest
+    scmid: default
+    title: Bump Debian trixie Linux version to {{ source "trixieLatestVersion" }}
+    spec:
+      labels:
+        - dependencies
+        - debian

@@ -3,7 +3,7 @@ function Test-CommandExists($command) {
     $ErrorActionPreference = 'stop'
     $res = $false
     try {
-        if(Get-Command $command) { 
+        if (Get-Command $command) {
             $res = $true 
         }
     } catch {
@@ -15,13 +15,13 @@ function Test-CommandExists($command) {
 }
 
 # check dependencies
-if(-Not (Test-CommandExists docker)) {
-    Write-Error "docker is not available"
+if (-Not (Test-CommandExists docker)) {
+    Write-Error 'docker is not available'
 }
 
 function Get-EnvOrDefault($name, $def) {
     $entry = Get-ChildItem env: | Where-Object { $_.Name -eq $name } | Select-Object -First 1
-    if(($null -ne $entry) -and ![System.String]::IsNullOrWhiteSpace($entry.Value)) {
+    if (($null -ne $entry) -and ![System.String]::IsNullOrWhiteSpace($entry.Value)) {
         return $entry.Value
     }
     return $def
@@ -35,9 +35,9 @@ function Retry-Command {
         [scriptblock] $ScriptBlock,
         [int] $RetryCount = 3,
         [int] $Delay = 30,
-        [string] $SuccessMessage = "Command executed successfuly!",
-        [string] $FailureMessage = "Failed to execute the command"
-        )
+        [string] $SuccessMessage = 'Command executed successfuly!',
+        [string] $FailureMessage = 'Failed to execute the command'
+    )
 
     process {
         $Attempt = 1
@@ -72,34 +72,32 @@ function Retry-Command {
 }
 
 function Cleanup($name='') {
-    if([System.String]::IsNullOrWhiteSpace($name)) {
+    if ([System.String]::IsNullOrWhiteSpace($name)) {
         $name = Get-EnvOrDefault 'AGENT_IMAGE' ''
     }
 
-    if(![System.String]::IsNullOrWhiteSpace($name)) {
-        #Write-Host "Cleaning up $name"
+    if (![System.String]::IsNullOrWhiteSpace($name)) {
         docker kill "$name" 2>&1 | Out-Null
         docker rm -fv "$name" 2>&1 | Out-Null
     }
 }
 
-function Is-AgentContainerRunning($container='') {
-    if([System.String]::IsNullOrWhiteSpace($container)) {
+function Is-ContainerRunning($container='') {
+    if ([System.String]::IsNullOrWhiteSpace($container)) {
         $container = Get-EnvOrDefault 'AGENT_CONTAINER' ''
     }
 
     Start-Sleep -Seconds 5
-    Retry-Command -RetryCount 3 -Delay 1 -ScriptBlock { 
+    Retry-Command -RetryCount 10 -Delay 3 -ScriptBlock { 
         $exitCode, $stdout, $stderr = Run-Program 'docker.exe' "inspect -f `"{{.State.Running}}`" $container"
-        if(($exitCode -ne 0) -or (-not $stdout.Contains('true')) ) {
+        if (($exitCode -ne 0) -or (-not $stdout.Contains('true')) ) {
             throw('Exit code incorrect, or invalid value for running state')
         }
         return $true
-    } | Should -BeTrue
+    }
 }
 
 function Run-Program($cmd, $params) {
-    #Write-Host "cmd = $cmd, params = $params"
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.CreateNoWindow = $true
     $psi.UseShellExecute = $false
@@ -114,9 +112,43 @@ function Run-Program($cmd, $params) {
     $stdout = $proc.StandardOutput.ReadToEnd()
     $stderr = $proc.StandardError.ReadToEnd()
     $proc.WaitForExit()
-    if($proc.ExitCode -ne 0) {
-        Write-Host "`n`nstdout:`n$stdout`n`nstderr:`n$stderr`n`n"
+    if (($env:TESTS_DEBUG -eq 'debug') -or ($env:TESTS_DEBUG -eq 'verbose')) {
+        Write-Host -ForegroundColor DarkBlue "[cmd] $cmd $params"
+        if ($env:TESTS_DEBUG -eq 'verbose') {
+            Write-Host -ForegroundColor DarkGray "[stdout] $stdout"
+        }
+        if ($proc.ExitCode -ne 0){
+            Write-Host -ForegroundColor DarkRed "[stderr] $stderr"
+        }
     }
 
     return $proc.ExitCode, $stdout, $stderr
+}
+
+function Start-NcatContainer($windowsVersionTag, $networkName, $port = 5000, $timeoutSeconds = 30) {
+    $listenerScript = @"
+`$listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Any, $port)
+`$listener.Start()
+try {
+    `$task = `$listener.AcceptTcpClientAsync()
+    if (-not `$task.Wait(${timeoutSeconds}000)) { exit 1 }
+    `$client = `$task.Result
+    `$stream  = `$client.GetStream()
+    `$stream.ReadTimeout = ${timeoutSeconds}000
+    `$buf = New-Object byte[] 65536
+    `$n   = `$stream.Read(`$buf, 0, `$buf.Length)
+    [Text.Encoding]::ASCII.GetString(`$buf, 0, `$n)
+    `$client.Close()
+} finally {
+    `$listener.Stop()
+}
+"@
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($listenerScript))
+    $exitCode, $stdout, $stderr = Run-Program 'docker' "run --detach --tty --name ncat-helper --network=${networkName} mcr.microsoft.com/windows/servercore:${windowsVersionTag} powershell.exe -NonInteractive -EncodedCommand $encoded"
+    $exitCode | Should -Be 0
+    Is-ContainerRunning 'ncat-helper' | Should -BeTrue
+}
+
+function CleanupNetwork($name) {
+    docker network rm $name 2>&1 | Out-Null
 }

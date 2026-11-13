@@ -1,119 +1,174 @@
-pipeline {
-    agent none
+final String cronExpr = env.BRANCH_IS_PRIMARY ? '@daily' : ''
 
-    options {
-        buildDiscarder(logRotator(daysToKeepStr: '10'))
-        timestamps()
+properties([
+    buildDiscarder(logRotator(numToKeepStr: '10')),
+    disableConcurrentBuilds(abortPrevious: true),
+    pipelineTriggers([cron(cronExpr)]),
+])
+
+def agentSelector(String imageType, retryCounter) {
+    def platform
+    switch (imageType) {
+        // All Windows images
+        case ~/(nanoserver|windowsservercore).*/:
+            platform = 'windows-2025'
+            break
+
+        // Linux
+        default:
+            // Need Docker and a LOT of memory for faster builds (due to multi archs)
+            platform = 'docker-highmem'
+            break
     }
 
-    stages {
-        stage('Build') {
-            parallel {
-                stage('Windows') {
-                    agent {
-                        label "docker-windows"
-                    }
-                    options {
-                        timeout(time: 60, unit: 'MINUTES')
-                    }
-                    environment {
-                        DOCKERHUB_ORGANISATION = "${infra.isTrusted() ? 'jenkins' : 'jenkins4eval'}"
-                    }
-                    stages {
-                        stage('Build and Test') {
-                            // This stage is the "CI" and should be run on all code changes triggered by a code change
-                            when {
-                                not { buildingTag() }
-                            }
-                            steps {
-                                powershell '& ./build.ps1 test'
-                            }
-                            post {
-                                always {
-                                    junit(allowEmptyResults: true, keepLongStdio: true, testResults: 'target/**/junit-results.xml')
-                                }
+    // Defined in https://github.com/jenkins-infra/pipeline-library/blob/master/vars/infra.groovy
+    return infra.getBuildAgentLabel([
+        useContainerAgent: false,
+        platform: platform,
+        spotRetryCounter: retryCounter
+    ])
+}
+
+// Defaul values
+def tagWithOneDashExist = false
+def remotingVersion = '3395.v6e5377b_0fb_3c'
+def buildNumber = env.BUILD_NUMBER
+// Values on tag containing the remoting version and build number
+if (env.TAG_NAME) {
+    def tagItems = env.TAG_NAME.split('-')
+    if (tagItems.length == 2) {
+        tagWithOneDashExist = true
+        remotingVersion = tagItems[0]
+        buildNumber = tagItems[1]
+    }
+}
+
+// Specify java release(s) to build for Windows images
+def windowsJavaReleases = [21, 25]
+
+// Specify parallel stages
+// Linux: bake group(s) or target(s), see 'make list' or 'make listgroup-linux' output
+// Note: splitting Alpine and Debian targets to avoid 429 rate limit errors from Docker Hub
+// Windows: flavor and version to build
+def parallelStages = [failFast: false]
+[
+    'agent_alpine_jdk21',
+    'agent_alpine_jdk25',
+    'inbound-agent_alpine_jdk21',
+    'inbound-agent_alpine_jdk25',
+    'agent_debian_jdk21',
+    'agent_debian_jdk25',
+    'inbound-agent_debian_jdk21',
+    'inbound-agent_debian_jdk25',
+    'rhel_ubi9',
+    'nanoserver-ltsc2022',
+    'nanoserver-ltsc2025',
+    'windowsservercore-ltsc2022',
+    'windowsservercore-ltsc2025',
+].each { imageType ->
+    parallelStages[imageType] = {
+        withEnv([
+            "ON_TAG=${tagWithOneDashExist}",
+            "REMOTING_VERSION=${remotingVersion}",
+            "BUILD_NUMBER=${buildNumber}",
+            "IMAGE_TYPE=${imageType}",
+            "REGISTRY_ORG=${infra.isTrusted() ? 'jenkins' : 'jenkins4eval'}"
+        ]) {
+            int retryCounter = 0
+            retry(count: 2, conditions: [agent(), nonresumable()]) {
+                // Use local variable to manage concurrency and increment BEFORE spinning up any agent
+                final String resolvedAgentLabel = agentSelector(imageType, retryCounter)
+                retryCounter++
+                node(resolvedAgentLabel) {
+                    timeout(time: 60, unit: 'MINUTES') {
+                        checkout scm
+                        stage("Prepare Docker on ${resolvedAgentLabel}") {
+                            if (isUnix()) {
+                                sh 'make docker-init'
+                            } else {
+                                powershell './make.ps1 docker-init'
+                                archiveArtifacts artifacts: 'build-windows_*.yaml', allowEmptyArchive: true
                             }
                         }
-                        stage('Deploy to DockerHub') {
-                            // This stage is the "CD" and should only be run when a tag triggered the build
-                            when {
-                                buildingTag()
+
+                        if (isUnix()) {
+                            stage('Checks') {
+                                sh 'make hadolint'
+                                sh 'make shellcheck'
                             }
-                            steps {
-                                script {
-                                    if(env.TAG_NAME != null) {
-                                        def tagItems = env.TAG_NAME.split('-')
-                                        if(tagItems.length == 2) {
-                                            def remotingVersion = tagItems[0]
-                                            def buildNumber = tagItems[1]
-                                            // This function is defined in the jenkins-infra/pipeline-library
-                                            infra.withDockerCredentials {
-                                                powershell "& ./build.ps1 -PushVersions -RemotingVersion $remotingVersion -BuildNumber $buildNumber -DisableEnvProps publish"
+                        }
+
+                        // No single arch build or test on trusted.ci.jenkins.io
+                        if (!infra.isTrusted()) {
+                            // Build current arch for Linux images
+                            stage('Build current arch') {
+                                if (isUnix()) {
+                                    sh 'make "build-${IMAGE_TYPE}"'
+                                } else {
+                                    // No multiarch Windows images
+                                    windowsJavaReleases.each { javaRelease ->
+                                        withEnv(["JAVA_RELEASE_OVERRIDE=${javaRelease}"]) {
+                                            powershell './make.ps1 build -ImageType ${env:IMAGE_TYPE}'
+                                        }
+                                    }
+                                }
+                            }
+
+                            stage('Test') {
+                                if (isUnix()) {
+                                    sh 'make "test-${IMAGE_TYPE}"'
+                                } else {
+                                    windowsJavaReleases.each { javaRelease ->
+                                        withEnv(["JAVA_RELEASE_OVERRIDE=${javaRelease}"]) {
+                                            powershell './make.ps1 test -ImageType ${env:IMAGE_TYPE}'
+                                        }
+                                    }
+                                }
+                                junit 'target/**/junit-results*.xml'
+                            }
+                            archiveArtifacts artifacts: 'target/build-result-metadata_*.json', allowEmptyArchive: true
+                        }
+
+                        // If the tests are passing for Linux AMD64 or if we're on trusted.ci.jenkins.io
+                        // then we build all the CPU architectures
+                        stage('Build multiarch') {
+                            if (isUnix()) {
+                                sh 'make "multiarchbuild-${IMAGE_TYPE}"'
+                            } else {
+                                // No multiarch images for Windows, (re)building them here on both controllers
+                                windowsJavaReleases.each { javaRelease ->
+                                    withEnv(["JAVA_RELEASE_OVERRIDE=${javaRelease}"]) {
+                                        powershell './make.ps1 build -ImageType ${env:IMAGE_TYPE}'
+                                    }
+                                }
+                            }
+                            archiveArtifacts artifacts: 'target/build-result-metadata_*.json', allowEmptyArchive: true
+                        }
+
+                        // trusted.ci.jenkins.io builds (e.g. publication to DockerHub)
+                        if (infra.isTrusted()) {
+                            stage('Deploy to DockerHub') {
+                                if (!tagWithOneDashExist) {
+                                    error("The deployment to Docker Hub failed because the tag doesn't contain any '-'.")
+                                }
+                                // This function is defined in the jenkins-infra/pipeline-library
+                                infra.withDockerCredentials {
+                                    if (isUnix()) {
+                                        if (imageType != 'linux') {
+                                            sh 'make "publish-${IMAGE_TYPE}"'
+                                        } else {
+                                            // Batch Linux images publication by distribution to avoid 429 rate limit errors from Docker Hub
+                                            sh 'make listgroup-linux | xargs -I {} make "publish-{}"'
+                                        }
+                                    } else {
+                                        windowsJavaReleases.each { javaRelease ->
+                                            withEnv(["JAVA_RELEASE_OVERRIDE=${javaRelease}"]) {
+                                                powershell './make.ps1 publish -ImageType ${env:IMAGE_TYPE}'
                                             }
                                         }
                                     }
                                 }
-                            }
-                        }
-                    }
-                }
-                stage('Linux') {
-                    agent {
-                        label "docker && linux"
-                    }
-                    options {
-                        timeout(time: 30, unit: 'MINUTES')
-                    }
-                    environment {
-                        DOCKERHUB_ORGANISATION = "${infra.isTrusted() ? 'jenkins' : 'jenkins4eval'}"
-                    }
-                    stages {
-                        stage('Prepare Docker') {
-                            steps {
-                                sh '''
-                                docker buildx create --use
-                                docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
-                                '''
-                            }
-                        }
-                        stage('Build and Test') {
-                            // This stage is the "CI" and should be run on all code changes triggered by a code change
-                            when {
-                                not { buildingTag() }
-                            }
-                            steps {
-                                sh './build.sh'
-                                sh './build.sh test'
-                                // If the tests are passing for Linux AMD64, then we can build all the CPU architectures
-                                sh 'docker buildx bake --file docker-bake.hcl linux'
-                            }
-                            post {
-                                always {
-                                    junit(allowEmptyResults: true, keepLongStdio: true, testResults: 'target/*.xml')
-                                }
-                            }
-                        }
-                        stage('Deploy to DockerHub') {
-                            // This stage is the "CD" and should only be run when a tag triggered the build
-                            when {
-                                buildingTag()
-                            }
-                            steps {
-                                script {
-                                    def tagItems = env.TAG_NAME.split('-')
-                                    if(tagItems.length == 2) {
-                                        def remotingVersion = tagItems[0]
-                                        def buildNumber = tagItems[1]
-                                        // This function is defined in the jenkins-infra/pipeline-library
-                                        infra.withDockerCredentials {
-                                            sh """
-                                            docker buildx create --use
-                                            docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
-                                            ./build.sh -r ${remotingVersion} -b ${buildNumber} -d publish
-                                            """
-                                        }
-                                    }
-                                }
+                                archiveArtifacts artifacts: 'target/build-result-metadata_*.json', allowEmptyArchive: true
                             }
                         }
                     }
@@ -123,4 +178,6 @@ pipeline {
     }
 }
 
-// vim: ft=groovy
+// Execute parallel stages
+parallel parallelStages
+// // vim: ft=groovy

@@ -7,8 +7,7 @@ OPTIND=1
 
 target="build"
 build_number="1"
-remoting_version="3107.v665000b_51092"
-disable_env_props=0
+remoting_version="3395.v6e5377b_0fb_3c"
 exit_result=0
 
 function exit_if_error() {
@@ -19,7 +18,7 @@ function exit_if_error() {
   fi
 }
 
-while getopts "t:r:b:d" opt; do
+while getopts "t:r:b" opt; do
   case "$opt" in
     t)
       target=$OPTARG
@@ -29,9 +28,6 @@ while getopts "t:r:b:d" opt; do
       ;;
     b)
       build_number=$OPTARG
-      ;;
-    d)
-      disable_env_props=1
       ;;
     *)
       echo "Invalid flag passed: '${opt}'."
@@ -46,16 +42,13 @@ if [[ $# -gt 0 ]] ; then
   shift
 fi
 
-if [[ "${disable_env_props}" = "0" ]] ; then
-  source env.props
-  export "$(cut -d= -f1 env.props)"
-fi
-
-REPOSITORY=${DOCKERHUB_REPO:-agent}
-ORGANIZATION=${DOCKERHUB_ORGANISATION:-jenkins}
+export REGISTRY_ORG=${DOCKERHUB_ORGANISATION:-jenkins4eval}
+export REGISTRY_REPO_AGENT=${DOCKERHUB_REPO_AGENT:-agent}
+export REGISTRY_REPO_INBOUND_AGENT=${DOCKERHUB_REPO_INBOUND_AGENT:-inbound-agent}
 remoting_version=${REMOTING_VERSION:-${remoting_version}}
 
 if [[ "${target}" = "build" ]] ; then
+  make show
   make build
   exit_result=$?
   exit_if_error
@@ -71,12 +64,12 @@ fi
 
 if [[ "${target}" = "publish" ]] ; then
   set -x
-  export JENKINS_REPO="${ORGANIZATION}/${REPOSITORY}"
   export REMOTING_VERSION="${remoting_version}"
   if [[ -n "${build_number}" ]] ; then
     export ON_TAG=true
     export BUILD_NUMBER=$build_number
   fi
+  make show
   docker buildx bake --push --file docker-bake.hcl linux
   exit_result=$?
 fi

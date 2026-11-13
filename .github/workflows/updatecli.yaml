@@ -3,29 +3,31 @@ on:
   # Allow to be run manually
   workflow_dispatch:
   schedule:
-    # Run once per week (to avoid alert fatigue)
-    - cron: '0 2 * * 1' # Every Monday at 2am UTC
+    - cron: '0 1 * * *' # Once a day at 01:00am UTC
   push:
   pull_request:
+
+# Only allow 1 updatecli build at a time to avoid orphaned updatecli branches
+concurrency: "updatecli"
+
 jobs:
   updatecli:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v7
 
       - name: Install Updatecli in the runner
-        uses: updatecli/updatecli-action@v2.28.2
-        with:
-          version: v0.46.0
+        uses: updatecli/updatecli-action@v3.10.0
 
       - name: Run Updatecli in Dry Run mode
-        run: updatecli diff --config ./updatecli/updatecli.d --values ./updatecli/values.github-action.yaml
+        if: github.ref != 'refs/heads/master'
+        run: updatecli pipeline diff --config ./updatecli/updatecli.d --values ./updatecli/values.github-action.yaml
         env:
           UPDATECLI_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run Updatecli in Apply mode
         if: github.ref == 'refs/heads/master'
-        run: updatecli apply --config ./updatecli/updatecli.d --values ./updatecli/values.github-action.yaml
+        run: updatecli pipeline apply --config ./updatecli/updatecli.d --values ./updatecli/values.github-action.yaml
         env:
           UPDATECLI_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

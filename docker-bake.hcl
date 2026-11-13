@@ -1,56 +1,37 @@
-group "linux" {
-  targets = [
-    "alpine_jdk11",
-    "alpine_jdk17",
-    "archlinux_jdk11",
-    "debian_jdk11",
-    "debian_jdk17",
-  ]
+## Variables
+variable "agent_types_to_build" {
+  default = ["agent", "inbound-agent"]
 }
 
-group "linux-arm64" {
-  targets = [
-    "debian_jdk11",
-    "debian_jdk17",
-  ]
+variable "java_releases_to_build" {
+  default = [21, 25]
+}
+variable "default_java_release" {
+  default = 21
 }
 
-group "linux-arm32" {
-  targets = [
-    "debian_jdk11",
-    "debian_jdk17"
-  ]
-}
-
-group "linux-s390x" {
-  targets = [
-    "debian_jdk11",
-  ]
-}
-
-group "linux-ppc64le" {
-  targets = [
-    "debian_jdk11",
-    "debian_jdk17",
-  ]
-}
-
-group "windows" {
-  targets = [
-    "windows_2019_jdk11",
-  ]
+variable "java_releases_in_preview" {
+  default = []
 }
 
 variable "REMOTING_VERSION" {
-  default = "3107.v665000b_51092"
+  default = "3395.v6e5377b_0fb_3c"
 }
 
 variable "REGISTRY" {
   default = "docker.io"
 }
 
-variable "JENKINS_REPO" {
-  default = "jenkins/agent"
+variable "REGISTRY_ORG" {
+  default = "jenkins"
+}
+
+variable "REGISTRY_REPO_AGENT" {
+  default = "agent"
+}
+
+variable "REGISTRY_REPO_INBOUND_AGENT" {
+  default = "inbound-agent"
 }
 
 variable "BUILD_NUMBER" {
@@ -62,102 +43,261 @@ variable "ON_TAG" {
 }
 
 variable "ALPINE_FULL_TAG" {
-  default = "3.17.3"
+  default = "3.24.4"
 }
 
 variable "ALPINE_SHORT_TAG" {
   default = regex_replace(ALPINE_FULL_TAG, "\\.\\d+$", "")
 }
 
-target "archlinux_jdk11" {
-  dockerfile = "11/archlinux/Dockerfile"
-  context = "."
-  args = {
-    VERSION = REMOTING_VERSION
-  }
-  tags = [
-    equal(ON_TAG, "true") ? "${REGISTRY}/${JENKINS_REPO}:${REMOTING_VERSION}-${BUILD_NUMBER}-archlinux": "",
-    equal(ON_TAG, "true") ? "${REGISTRY}/${JENKINS_REPO}:${REMOTING_VERSION}-${BUILD_NUMBER}-archlinux-jdk11" : "",
-    "${REGISTRY}/${JENKINS_REPO}:archlinux",
-    "${REGISTRY}/${JENKINS_REPO}:latest-archlinux",
-    "${REGISTRY}/${JENKINS_REPO}:archlinux-jdk11",
-    "${REGISTRY}/${JENKINS_REPO}:latest-archlinux-jdk11",
-  ]
-  platforms = ["linux/amd64"]
+variable "DEBIAN_RELEASE" {
+  default = "trixie-20261104"
 }
 
-target "alpine_jdk11" {
-  dockerfile = "11/alpine/Dockerfile"
-  context = "."
-  args = {
-    ALPINE_TAG = ALPINE_FULL_TAG
-    VERSION = REMOTING_VERSION
-  }
-  tags = [
-    equal(ON_TAG, "true") ? "${REGISTRY}/${JENKINS_REPO}:${REMOTING_VERSION}-${BUILD_NUMBER}-alpine": "",
-    equal(ON_TAG, "true") ? "${REGISTRY}/${JENKINS_REPO}:${REMOTING_VERSION}-${BUILD_NUMBER}-alpine${ALPINE_SHORT_TAG}": "",
-    equal(ON_TAG, "true") ? "${REGISTRY}/${JENKINS_REPO}:${REMOTING_VERSION}-${BUILD_NUMBER}-alpine-jdk11": "",
-    equal(ON_TAG, "true") ? "${REGISTRY}/${JENKINS_REPO}:${REMOTING_VERSION}-${BUILD_NUMBER}-alpine${ALPINE_SHORT_TAG}-jdk11": "",
-    "${REGISTRY}/${JENKINS_REPO}:alpine",
-    "${REGISTRY}/${JENKINS_REPO}:alpine${ALPINE_SHORT_TAG}",
-    "${REGISTRY}/${JENKINS_REPO}:alpine-jdk11",
-    "${REGISTRY}/${JENKINS_REPO}:alpine${ALPINE_SHORT_TAG}-jdk11",
-    "${REGISTRY}/${JENKINS_REPO}:latest-alpine",
-    "${REGISTRY}/${JENKINS_REPO}:latest-alpine${ALPINE_SHORT_TAG}",
-    "${REGISTRY}/${JENKINS_REPO}:latest-alpine-jdk11",
-    "${REGISTRY}/${JENKINS_REPO}:latest-alpine${ALPINE_SHORT_TAG}-jdk11",
-  ]
-  platforms = ["linux/amd64"]
+variable "UBI9_TAG" {
+  default = "9.9-1794466612"
 }
 
-target "alpine_jdk17" {
-  dockerfile = "17/alpine/Dockerfile"
-  context = "."
-  args = {
-    ALPINE_TAG = ALPINE_FULL_TAG
-    VERSION = REMOTING_VERSION
-  }
-  tags = [
-    equal(ON_TAG, "true") ? "${REGISTRY}/${JENKINS_REPO}:${REMOTING_VERSION}-${BUILD_NUMBER}-alpine-jdk17": "",
-    equal(ON_TAG, "true") ? "${REGISTRY}/${JENKINS_REPO}:${REMOTING_VERSION}-${BUILD_NUMBER}-alpine${ALPINE_SHORT_TAG}-jdk17": "",
-    "${REGISTRY}/${JENKINS_REPO}:alpine-jdk17",
-    "${REGISTRY}/${JENKINS_REPO}:alpine${ALPINE_SHORT_TAG}-jdk17",
-    "${REGISTRY}/${JENKINS_REPO}:latest-alpine-jdk17",
-    "${REGISTRY}/${JENKINS_REPO}:latest-alpine${ALPINE_SHORT_TAG}-jdk17",
-  ]
-  platforms = ["linux/amd64"]
+# Set this value to a specific Windows version to override Windows versions to build returned by windowsversions function
+variable "WINDOWS_VERSION_OVERRIDE" {
+  default = ""
 }
 
-target "debian_jdk11" {
-  dockerfile = "11/bullseye/Dockerfile"
-  context = "."
-  args = {
-    VERSION = REMOTING_VERSION
-  }
-  tags = [
-    equal(ON_TAG, "true") ? "${REGISTRY}/${JENKINS_REPO}:${REMOTING_VERSION}-${BUILD_NUMBER}": "",
-    equal(ON_TAG, "true") ? "${REGISTRY}/${JENKINS_REPO}:${REMOTING_VERSION}-${BUILD_NUMBER}-jdk11": "",
-    "${REGISTRY}/${JENKINS_REPO}:bullseye-jdk11",
-    "${REGISTRY}/${JENKINS_REPO}:jdk11",
-    "${REGISTRY}/${JENKINS_REPO}:latest",
-    "${REGISTRY}/${JENKINS_REPO}:latest-bullseye-jdk11",
-    "${REGISTRY}/${JENKINS_REPO}:latest-jdk11",
-  ]
-  platforms = ["linux/amd64", "linux/arm64", "linux/arm/v7", "linux/s390x", "linux/ppc64le"]
+# Set this value to a specific agent type to override agent type to build returned by windowsagenttypes function
+variable "WINDOWS_AGENT_TYPE_OVERRIDE" {
+  default = ""
 }
 
-target "debian_jdk17" {
-  dockerfile = "17/bullseye/Dockerfile"
-  context = "."
-  args = {
-    VERSION = REMOTING_VERSION,
+# Set this value to a specific version to override java release to build
+variable "JAVA_RELEASE_OVERRIDE" {
+  default = ""
+}
+
+## Targets
+target "alpine" {
+  matrix = {
+    type         = agent_types_to_build
+    java_release = java_releases(JAVA_RELEASE_OVERRIDE)
   }
-  tags = [
-    equal(ON_TAG, "true") ? "${REGISTRY}/${JENKINS_REPO}:${REMOTING_VERSION}-${BUILD_NUMBER}-jdk17": "",
-    "${REGISTRY}/${JENKINS_REPO}:bullseye-jdk17",
-    "${REGISTRY}/${JENKINS_REPO}:jdk17",
-    "${REGISTRY}/${JENKINS_REPO}:latest-bullseye-jdk17",
-    "${REGISTRY}/${JENKINS_REPO}:latest-jdk17",
+  name       = "${type}_alpine_jdk${java_release}"
+  target     = type
+  dockerfile = "alpine/Dockerfile"
+  context    = "."
+  args = {
+    ALPINE_TAG   = ALPINE_FULL_TAG
+    VERSION      = REMOTING_VERSION
+    JAVA_RELEASE = java_release
+  }
+  tags      = concat(linux_tags(type, java_release, "alpine"), linux_tags(type, java_release, "alpine${ALPINE_SHORT_TAG}"))
+  platforms = ["linux/amd64", "linux/arm64"]
+}
+
+target "debian" {
+  matrix = {
+    type         = agent_types_to_build
+    java_release = java_releases(JAVA_RELEASE_OVERRIDE)
+  }
+  name       = "${type}_debian_jdk${java_release}"
+  target     = type
+  dockerfile = "debian/Dockerfile"
+  context    = "."
+  args = {
+    VERSION        = REMOTING_VERSION
+    DEBIAN_RELEASE = DEBIAN_RELEASE
+    JAVA_RELEASE   = java_release
+  }
+  tags      = linux_tags(type, java_release, "debian")
+  platforms = ["linux/amd64", "linux/arm64", "linux/ppc64le", "linux/s390x", "linux/riscv64"]
+}
+
+target "rhel_ubi9" {
+  matrix = {
+    type         = agent_types_to_build
+    java_release = java_releases(JAVA_RELEASE_OVERRIDE)
+  }
+  name       = "${type}_rhel_ubi9_jdk${java_release}"
+  target     = type
+  dockerfile = "rhel/ubi9/Dockerfile"
+  context    = "."
+  args = {
+    UBI9_TAG     = UBI9_TAG
+    VERSION      = REMOTING_VERSION
+    JAVA_RELEASE = java_release
+  }
+  tags      = linux_tags(type, java_release, "rhel-ubi9")
+  platforms = ["linux/amd64", "linux/arm64", "linux/ppc64le"]
+}
+
+target "nanoserver" {
+  matrix = {
+    type            = windowsagenttypes(WINDOWS_AGENT_TYPE_OVERRIDE)
+    java_release    = java_releases(JAVA_RELEASE_OVERRIDE)
+    windows_version = windowsversions("nanoserver")
+  }
+  name       = "${type}_nanoserver-${windows_version}_jdk${java_release}"
+  dockerfile = "windows/nanoserver/Dockerfile"
+  context    = "."
+  args = {
+    VERSION             = REMOTING_VERSION
+    WINDOWS_VERSION_TAG = windows_version
+    JAVA_RELEASE        = java_release
+  }
+  target    = type
+  tags      = windows_tags(type, java_release, "nanoserver-${windows_version}")
+  platforms = ["windows/amd64"]
+}
+
+target "windowsservercore" {
+  matrix = {
+    type            = windowsagenttypes(WINDOWS_AGENT_TYPE_OVERRIDE)
+    java_release    = java_releases(JAVA_RELEASE_OVERRIDE)
+    windows_version = windowsversions("windowsservercore")
+  }
+  name       = "${type}_windowsservercore-${windows_version}_jdk${java_release}"
+  dockerfile = "windows/windowsservercore/Dockerfile"
+  context    = "."
+  args = {
+    JAVA_RELEASE        = java_release
+    VERSION             = REMOTING_VERSION
+    WINDOWS_VERSION_TAG = windows_version
+  }
+  target    = type
+  tags      = windows_tags(type, java_release, "windowsservercore-${windows_version}")
+  platforms = ["windows/amd64"]
+}
+
+## Groups
+group "linux" {
+  targets = [
+    "alpine",
+    "debian",
+    "rhel_ubi9"
   ]
-  platforms = ["linux/amd64", "linux/arm64", "linux/arm/v7", "linux/ppc64le"]
+}
+
+group "windows" {
+  targets = [
+    "nanoserver",
+    "windowsservercore"
+  ]
+}
+
+group "all" {
+  targets = [
+    "linux",
+    "windows",
+  ]
+}
+
+## Common functions
+# Return the registry organization and repository depending on the agent type
+function "orgrepo" {
+  params = [agentType]
+  result = equal("agent", agentType) ? "${REGISTRY_ORG}/${REGISTRY_REPO_AGENT}" : "${REGISTRY_ORG}/${REGISTRY_REPO_INBOUND_AGENT}"
+}
+
+# Return "true" if the java_release passed as parameter is the same as the default java_release, "false" otherwise
+function "is_default_java_release" {
+  params = [java_release]
+  result = equal(default_java_release, java_release) ? true : false
+}
+
+# Return array of java releases to build
+# Can be overriden to a specific version
+function "java_releases" {
+  params = [override]
+  result = (notequal(override, "")
+    ? [override]
+  : java_releases_to_build)
+}
+
+## Specific functions
+# Return array of Windows version(s) to build
+# Can be overriden by setting WINDOWS_VERSION_OVERRIDE to a specific Windows version
+# Ex: WINDOWS_VERSION_OVERRIDE=ltsc2025 docker buildx bake windows
+function "windowsversions" {
+  params = [flavor]
+  result = (notequal(WINDOWS_VERSION_OVERRIDE, "")
+    ? [WINDOWS_VERSION_OVERRIDE]
+  : ["ltsc2022", "ltsc2025"])
+}
+
+# Return array of agent type(s) to build
+# Can be overriden to a specific agent type
+function "windowsagenttypes" {
+  params = [override]
+  result = (notequal(override, "")
+    ? [override]
+  : agent_types_to_build)
+}
+
+# Return the distribution followed by a dash if it is not the default distribution
+function distribution_prefix {
+  params = [distribution]
+  result = (equal("debian", distribution)
+    ? ""
+  : "${distribution}-")
+}
+
+# Return a dash followed by the distribution if it is not the default distribution
+function distribution_suffix {
+  params = [distribution]
+  result = (equal("debian", distribution)
+    ? ""
+  : "-${distribution}")
+}
+
+# Return the official name of the default distribution
+function distribution_name {
+  params = [distribution]
+  result = (equal("debian", distribution)
+    ? "trixie"
+  : distribution)
+}
+
+# Return the tag suffixed by "-preview" if the java_release passed as parameter is in the java_releases_in_preview list
+function preview_tag {
+  params = [java_release]
+  result = (contains(java_releases_in_preview, java_release)
+    ? "${java_release}-preview"
+  : java_release)
+}
+
+# Return an array of tags depending on the agent type, the java_release and the Linux distribution passed as parameters
+function "linux_tags" {
+  params = [type, java_release, distribution]
+  result = [
+    ## All
+    # If there is a tag, add versioned tag suffixed by the java_release
+    equal(ON_TAG, "true") ? "${REGISTRY}/${orgrepo(type)}:${REMOTING_VERSION}-${BUILD_NUMBER}${distribution_suffix(distribution)}-jdk${preview_tag(java_release)}" : "",
+
+    # If there is a tag and if the java_release is the default one, add versioned short tag
+    equal(ON_TAG, "true") ? (is_default_java_release(java_release) ? "${REGISTRY}/${orgrepo(type)}:${REMOTING_VERSION}-${BUILD_NUMBER}${distribution_suffix(distribution)}" : "") : "",
+
+    # If the java_release is the default one, add distribution and latest short tags
+    is_default_java_release(java_release) ? "${REGISTRY}/${orgrepo(type)}:${distribution_name(distribution)}" : "",
+    is_default_java_release(java_release) ? "${REGISTRY}/${orgrepo(type)}:latest${distribution_suffix(distribution)}" : "",
+    # Needed for the ":latest-trixie" case. For other distributions, result in the same tag as above (not an issue, deduplicated at the end)
+    is_default_java_release(java_release) ? "${REGISTRY}/${orgrepo(type)}:latest-${distribution_name(distribution)}" : "",
+
+    # Tags always added
+    "${REGISTRY}/${orgrepo(type)}:${distribution_name(distribution)}-jdk${preview_tag(java_release)}",
+    "${REGISTRY}/${orgrepo(type)}:latest-${distribution_name(distribution)}-jdk${preview_tag(java_release)}",
+    # ":jdkN" and ":latest-jdkN" short tags for the default distribution. For other distributions, result in the tags above (not an issue, deduplicated at the end)
+    "${REGISTRY}/${orgrepo(type)}:${distribution_prefix(distribution)}jdk${preview_tag(java_release)}",
+    "${REGISTRY}/${orgrepo(type)}:latest-${distribution_prefix(distribution)}jdk${preview_tag(java_release)}",
+  ]
+}
+
+# Return an array of tags depending on the agent type, the java_release and the flavor and version of Windows passed as parameters
+function "windows_tags" {
+  params = [type, java_release, flavor_and_version]
+  result = [
+    # If there is a tag, add versioned tag containing the java_release
+    equal(ON_TAG, "true") ? "${REGISTRY}/${orgrepo(type)}:${REMOTING_VERSION}-${BUILD_NUMBER}-jdk${preview_tag(java_release)}-${flavor_and_version}" : "",
+    # If there is a tag and if the java_release is the default one, add versioned and short tags
+    equal(ON_TAG, "true") ? (is_default_java_release(java_release) ? "${REGISTRY}/${orgrepo(type)}:${REMOTING_VERSION}-${BUILD_NUMBER}-${flavor_and_version}" : "") : "",
+    equal(ON_TAG, "true") ? (is_default_java_release(java_release) ? "${REGISTRY}/${orgrepo(type)}:${flavor_and_version}" : "") : "",
+    "${REGISTRY}/${orgrepo(type)}:jdk${preview_tag(java_release)}-${flavor_and_version}",
+  ]
 }
